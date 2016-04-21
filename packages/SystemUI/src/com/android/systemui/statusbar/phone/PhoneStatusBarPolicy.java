@@ -84,6 +84,7 @@ public class PhoneStatusBarPolicy {
     private static final String SLOT_CDMA_ERI = "cdma_eri";
     private static final String SLOT_ALARM_CLOCK = "alarm_clock";
     private static final String SLOT_SU = "su";
+    private static final String SLOT_HEADSET = "headset";
 
     private static final String SDCARD_ABSENT = "sdcard_absent";
     private static final String SDCARD_KEYWORD = "SD";
@@ -94,6 +95,7 @@ public class PhoneStatusBarPolicy {
     private final CastController mCast;
     private final SuController mSuController;
     private boolean mAlarmIconVisible;
+    private boolean mSuIconVisible;
     private final HotspotController mHotspot;
 
     // Assume it's all good unless we hear otherwise.  We don't always seem
@@ -134,6 +136,9 @@ public class PhoneStatusBarPolicy {
             else if (action.equals(Intent.ACTION_USER_SWITCHED)) {
                 updateAlarm();
             }
+            else if (action.equals(Intent.ACTION_HEADSET_PLUG)) {
+                updateHeadset(intent);
+            }
         }
     };
 
@@ -170,6 +175,7 @@ public class PhoneStatusBarPolicy {
         filter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
         filter.addAction(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED);
         filter.addAction(Intent.ACTION_USER_SWITCHED);
+        filter.addAction(Intent.ACTION_HEADSET_PLUG);
         mContext.registerReceiver(mIntentReceiver, filter, null, mHandler);
 
         int numPhones = TelephonyManager.getDefault().getPhoneCount();
@@ -207,6 +213,10 @@ public class PhoneStatusBarPolicy {
         mService.setIconVisibility(SLOT_VOLUME, false);
         updateVolumeZen();
 
+        // headset
+        mService.setIcon(SLOT_HEADSET, R.drawable.stat_sys_headset, 0, null);
+        mService.setIconVisibility(SLOT_HEADSET, false);
+
         if (mContext.getResources().getBoolean(R.bool.config_showSdcardAbsentIndicator)) {
             mStorageManager = (StorageManager) context
                     .getSystemService(Context.STORAGE_SERVICE);
@@ -229,10 +239,13 @@ public class PhoneStatusBarPolicy {
         mService.setIconVisibility(SLOT_SU, false);
         mSuController.addCallback(mSuCallback);
 
-        mAlarmIconObserver.onChange(true);
+        mIconObserver.onChange(true);
         mContext.getContentResolver().registerContentObserver(
                 Settings.System.getUriFor(Settings.System.SHOW_ALARM_ICON),
-                false, mAlarmIconObserver);
+                false, mIconObserver);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SHOW_SU_ICON),
+                false, mIconObserver);
 
         // hotspot
         mService.setIcon(SLOT_HOTSPOT, R.drawable.stat_sys_hotspot, 0, null);
@@ -242,12 +255,15 @@ public class PhoneStatusBarPolicy {
         QSUtils.registerObserverForQSChanges(mContext, mQSListener);
     }
 
-    private ContentObserver mAlarmIconObserver = new ContentObserver(null) {
+    private ContentObserver mIconObserver = new ContentObserver(null) {
         @Override
         public void onChange(boolean selfChange, Uri uri) {
             mAlarmIconVisible = Settings.System.getInt(mContext.getContentResolver(),
                     Settings.System.SHOW_ALARM_ICON, 1) == 1;
+            mSuIconVisible = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.SHOW_SU_ICON, 1) == 1;
             updateAlarm();
+            updateSu();
         }
 
         @Override
@@ -255,6 +271,13 @@ public class PhoneStatusBarPolicy {
             onChange(selfChange, null);
         }
     };
+
+    private final void updateHeadset(Intent intent) {
+        int state = intent.getIntExtra("state", 0);
+        boolean mHeadsetIcon = Settings.System.getInt(mContext.getContentResolver(),
+                Settings.System.SHOW_HEADSET_ICON, 1) == 1;
+        mService.setIconVisibility(SLOT_HEADSET, (state == 1 && mHeadsetIcon)  ? true : false);
+    }
 
     private final void updateSDCardtoAbsent() {
         mService.setIcon(SDCARD_ABSENT, R.drawable.stat_sys_no_sdcard, 0, null);
@@ -455,7 +478,7 @@ public class PhoneStatusBarPolicy {
     };
 
     private void updateSu() {
-        mService.setIconVisibility(SLOT_SU, mSuController.hasActiveSessions());
+        mService.setIconVisibility(SLOT_SU, mSuIconVisible && mSuController.hasActiveSessions());
         if (mSuController.hasActiveSessions()) {
             publishSuCustomTile();
         } else {
